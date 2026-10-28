@@ -1,80 +1,90 @@
-import React from 'react';
-import { motion } from 'framer-motion';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { Activity, ShieldCheck } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { Activity, Clock3, Radio, ShieldAlert } from 'lucide-react';
+import { api } from '../services/api';
+import { useAuth } from '../hooks/useAuth';
 
-const data = [
-  { time: '10:00', score: 92 }, { time: '10:05', score: 95 },
-  { time: '10:10', score: 88 }, { time: '10:15', score: 91 },
-  { time: '10:20', score: 93 }, { time: '10:25', score: 94 },
-];
+const humanize = (value) => String(value || 'unknown').replaceAll('_', ' ');
+const dateText = (value) => value ? new Date(value).toLocaleString() : 'No assessment recorded';
 
 const LiveMonitoring = () => {
+  const { monitoringEnabled } = useAuth();
+  const [summary, setSummary] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [latestBatch, setLatestBatch] = useState(null);
+  const [error, setError] = useState('');
+
+  const refresh = useCallback(async () => {
+    try {
+      const [dashboardResponse, profileResponse] = await Promise.all([
+        api.get('/dashboard/summary'),
+        api.get('/profiles'),
+      ]);
+      setSummary(dashboardResponse.data);
+      setProfile(profileResponse.data);
+      setError('');
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Live session information is currently unavailable.');
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const timer = window.setInterval(refresh, 5000);
+    const handleBatch = (event) => setLatestBatch({ ...event.detail, receivedAt: new Date().toISOString() });
+    window.addEventListener('sentinel:behaviour-batch', handleBatch);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('sentinel:behaviour-batch', handleBatch);
+    };
+  }, [refresh]);
+
+  const session = summary?.session || {};
+  const monitoring = summary?.monitoring || {};
+  const status = session.status || 'unknown';
+  const risk = session.riskLevel || 'unknown';
+  const trustValid = risk !== 'unknown' && Number.isFinite(session.trustScore) && profile?.status === 'ready';
+
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
-        <div>
-          <h1 style={{ fontSize: '28px', fontWeight: '700', letterSpacing: '-0.5px' }}>Live Behaviour Monitoring</h1>
-          <p style={{ color: 'var(--text-muted)' }}>Real-time analysis of your behavioural patterns.</p>
-        </div>
-        <div className="liquid-glass" style={{ padding: '8px 16px', borderRadius: '20px', color: 'var(--success)', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--success)', boxShadow: '0 0 10px var(--success)', animation: 'pulse 1.5s infinite' }} />
-          Monitoring Active
-        </div>
+      <div className="page-heading"><div><p className="eyebrow">LIVE TELEMETRY</p><h1 style={{ marginTop: 9 }}>Live behaviour monitoring</h1><p>Current session state and actual feature-batch responses from this browser.</p></div><span className="status-pill" style={{ color: monitoringEnabled ? 'var(--success)' : 'var(--text-muted)' }}><span className="status-dot" style={{ background: monitoringEnabled ? 'var(--success)' : '#737386', marginTop: 0 }} />{monitoringEnabled ? 'Consent enabled' : 'Monitoring paused'}</span></div>
+      {error && <div className="inline-message warning" style={{ marginBottom: 18 }}>{error}</div>}
+      <div className="stat-grid" style={{ marginBottom: 20 }}>
+        <div className="stat-card"><div className="stat-label"><Radio size={14} style={{ verticalAlign: 'middle', marginRight: 7 }} />Collection state</div><div className="stat-value" style={{ fontSize: 21, textTransform: 'capitalize' }}>{monitoringEnabled ? 'Enabled' : 'Paused'}</div><div className="stat-detail">{monitoringEnabled ? 'Feature summaries are collected only after sufficient interaction.' : 'Enable monitoring from Behavioural profile.'}</div></div>
+        <div className="stat-card"><div className="stat-label"><ShieldAlert size={14} style={{ verticalAlign: 'middle', marginRight: 7 }} />Session risk</div><div className="stat-value" style={{ fontSize: 21, textTransform: 'capitalize' }}>{risk === 'unknown' ? 'Not evaluated' : humanize(risk)}</div><div className="stat-detail">{trustValid ? `Trust score ${Math.round(session.trustScore)}%` : 'Personalized risk decisions need a ready baseline.'}</div></div>
+        <div className="stat-card"><div className="stat-label"><Activity size={14} style={{ verticalAlign: 'middle', marginRight: 7 }} />Enrollment samples</div><div className="stat-value">{profile?.sampleCount || 0} / {monitoring.requiredSamples || 20}</div><div className="stat-detail">Profile status: {humanize(profile?.status || 'not_started')}</div></div>
+        <div className="stat-card"><div className="stat-label"><Clock3 size={14} style={{ verticalAlign: 'middle', marginRight: 7 }} />Last assessment</div><div className="stat-value" style={{ fontSize: 15 }}>{session.lastAssessmentAt ? new Date(session.lastAssessmentAt).toLocaleTimeString() : '—'}</div><div className="stat-detail">{dateText(session.lastAssessmentAt)}</div></div>
       </div>
 
-      <div className="grid-responsive">
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="liquid-glass" style={{ padding: '24px', gridColumn: 'span 2' }}>
-          <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '20px' }}>Real-time Trust Score</h3>
-          <div style={{ height: '250px' }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={data}>
-                <XAxis dataKey="time" stroke="rgba(255,255,255,0.2)" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 12 }} />
-                <YAxis stroke="rgba(255,255,255,0.2)" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 12 }} domain={[0, 100]} />
-                <Tooltip contentStyle={{ background: 'rgba(10,10,15,0.9)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }} />
-                <Line type="monotone" dataKey="score" stroke="#8b5cf6" strokeWidth={3} dot={{ fill: '#8b5cf6', r: 4 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </motion.div>
-
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="liquid-glass" style={{ padding: '24px' }}>
-          <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '20px' }}>Key Metrics</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {[
-              { label: 'Typing Speed', value: '72 WPM', diff: '+12%' },
-              { label: 'Mouse Movement', value: 'Smooth', diff: '+8%' },
-              { label: 'Click Rate', value: 'Normal', diff: '+5%' },
-              { label: 'Idle Time', value: 'Low', diff: '-10%' }
-            ].map((item, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', paddingBottom: '12px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                <span style={{ color: 'var(--text-muted)' }}>{item.label}</span>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontWeight: '600' }}>{item.value}</div>
-                  <div style={{ fontSize: '12px', color: item.diff.startsWith('+') ? 'var(--success)' : 'var(--danger)' }}>{item.diff}</div>
-                </div>
+      <div className="grid-responsive" style={{ alignItems: 'start' }}>
+        <section className="panel" style={{ gridColumn: 'span 2' }}>
+          <h2 className="panel-title">Latest feature batch</h2>
+          {!latestBatch ? <div className="empty-state">No feature batch has been submitted since this page opened. Enable monitoring, then interact with the app long enough to produce a 30-second sample window.</div> : (
+            <>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 9, marginBottom: 16 }}>
+                <span className="status-pill">{latestBatch.processingStatus || 'received'}</span>
+                <span className="status-pill">{latestBatch.model?.scoreMode || 'score mode unknown'}</span>
+                <span className="status-pill">{latestBatch.model?.baselineUsed ? 'Personalized baseline used' : 'No personal baseline used'}</span>
               </div>
-            ))}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 16 }}>
+                <div><div className="muted" style={{ fontSize: 11, marginBottom: 5 }}>Enrollment status</div><strong style={{ fontSize: 13 }}>{humanize(latestBatch.enrollment?.status)}</strong></div>
+                <div><div className="muted" style={{ fontSize: 11, marginBottom: 5 }}>Samples enrolled</div><strong style={{ fontSize: 13 }}>{latestBatch.enrollment?.sampleCount ?? 0}</strong></div>
+                <div><div className="muted" style={{ fontSize: 11, marginBottom: 5 }}>Decision policy</div><strong style={{ fontSize: 13, color: latestBatch.decision?.policyApplied ? 'var(--success)' : 'var(--warning)' }}>{latestBatch.decision?.policyApplied ? 'Applied' : 'Monitoring only'}</strong></div>
+                <div><div className="muted" style={{ fontSize: 11, marginBottom: 5 }}>Received in UI</div><strong style={{ fontSize: 12 }}>{dateText(latestBatch.receivedAt)}</strong></div>
+              </div>
+              {latestBatch.decision?.warning && <div className="inline-message warning" style={{ marginTop: 17 }}>{latestBatch.decision.warning}</div>}
+            </>
+          )}
+        </section>
+        <section className="panel">
+          <h2 className="panel-title">Session state</h2>
+          <div style={{ display: 'grid', gap: 16 }}>
+            <div><div className="muted" style={{ fontSize: 11, marginBottom: 5 }}>Status</div><strong style={{ fontSize: 13, textTransform: 'capitalize' }}>{humanize(status)}</strong></div>
+            <div><div className="muted" style={{ fontSize: 11, marginBottom: 5 }}>Model version</div><strong style={{ fontSize: 13 }}>{monitoring.modelVersion || 'Unknown'}</strong></div>
+            <div><div className="muted" style={{ fontSize: 11, marginBottom: 5 }}>Model service</div><strong style={{ fontSize: 13, textTransform: 'capitalize' }}>{humanize(monitoring.modelStatus)}</strong></div>
+            <div><div className="muted" style={{ fontSize: 11, marginBottom: 5 }}>Policy eligibility</div><strong style={{ fontSize: 13 }}>{profile?.status === 'ready' ? 'Eligible when live baseline score is returned' : 'Waiting for enrollment'}</strong></div>
           </div>
-        </motion.div>
-
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="liquid-glass" style={{ padding: '24px', gridColumn: '1 / -1' }}>
-           <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '20px' }}>Live Activity Feed</h3>
-           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-             {[
-               { time: '10:24:12', event: 'Mouse movement detected', type: 'normal' },
-               { time: '10:24:05', event: 'Key press recorded (Typing speed within range)', type: 'normal' },
-               { time: '10:23:55', event: 'Page navigation - Dashboard', type: 'normal' }
-             ].map((ev, i) => (
-               <div key={i} style={{ display: 'flex', gap: '16px', fontSize: '14px' }}>
-                 <span style={{ color: 'var(--text-muted)', width: '80px' }}>{ev.time}</span>
-                 <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                   <ShieldCheck size={16} color="var(--success)" /> {ev.event}
-                 </span>
-               </div>
-             ))}
-           </div>
-        </motion.div>
+          <p className="muted" style={{ fontSize: 11, lineHeight: 1.7, marginTop: 17 }}>This page does not invent a trust-score history. The backend currently exposes the latest session status, not a time-series endpoint for past assessments.</p>
+        </section>
       </div>
     </div>
   );

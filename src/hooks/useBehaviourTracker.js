@@ -1,102 +1,189 @@
 import { useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { api } from '../services/api';
 
-export const useBehaviourTracker = (isAuthenticated) => {
-  const keyTimings = useRef([]);
-  const lastKeyTime = useRef(null);
-  const mouseMovements = useRef([]);
-  const lastMouseTime = useRef(null);
-  const clickTimings = useRef([]);
-  const lastClickTime = useRef(null);
+const WINDOW_INTERVAL_MS = 30_000;
+const MIN_INTERACTIONS_PER_BATCH = 5;
+const MAX_FEATURE_VALUE = 1_000_000;
+
+function mean(values) {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+}
+function standardDeviation(values) {
+  if (values.length < 2) return 0;
+  const average = mean(values);
+  return Math.sqrt(values.reduce((sum, value) => sum + ((value - average) ** 2), 0) / values.length);
+}
+function median(values) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+function resetWindow(state, now, pathname) {
+  state.keyIntervals = [];
+  state.pointerSpeeds = [];
+  state.clickIntervals = [];
+  state.keyEvents = 0;
+  state.clickEvents = 0;
+  state.pointerSamples = 0;
+  state.navigationCount = 0;
+  state.idleMilliseconds = 0;
+  state.windowStart = now;
+  state.lastActivity = now;
+  state.lastKeyAt = null;
+  state.lastPointerAt = null;
+  state.lastPointerX = null;
+  state.lastPointerY = null;
+  state.pendingPointerDistance = 0;
+  state.lastClickAt = null;
+  state.pathname = pathname;
+}
+
+export const useBehaviourTracker = (isAuthenticated, monitoringEnabled) => {
+  const location = useLocation();
+  const stateRef = useRef({});
+  const sendingRef = useRef(false);
+  const pathnameRef = useRef(location.pathname);
 
   useEffect(() => {
-    if (!isAuthenticated) return;
+    const state = stateRef.current;
+    if (state.windowStart != null && pathnameRef.current !== location.pathname) {
+      state.navigationCount = (state.navigationCount || 0) + 1;
+      state.pathname = location.pathname;
+    }
+    pathnameRef.current = location.pathname;
+  }, [location.pathname]);
 
-    // --- Typing Tracker ---
-    const handleKeyDown = (e) => {
-      // Ignore password fields for privacy!
-      if (e.target.type === 'password') return;
+  useEffect(() => {
+    if (!isAuthenticated || !monitoringEnabled) return undefined;
+    const state = stateRef.current;
+    resetWindow(state, performance.now(), pathnameRef.current);
+    sendingRef.current = false;
 
-      const now = performance.now();
-      if (lastKeyTime.current) {
-        keyTimings.current.push(now - lastKeyTime.current);
+    const markActivity = (now = performance.now()) => {
+      if (state.lastActivity != null) {
+        const gap = now - state.lastActivity;
+        if (gap > 1000) state.idleMilliseconds += gap - 1000;
       }
-      lastKeyTime.current = now;
+      state.lastActivity = now;
     };
 
-    // --- Mouse Tracker ---
-    const handleMouseMove = (e) => {
+    const handleKeyDown = (event) => {
+      const target = event.target;
+      const inputType = target?.type?.toLowerCase();
+      // Timing only: never read event.key, input values, or typed text.
+      if (inputType === 'password' || event.repeat || target?.isContentEditable) return;
       const now = performance.now();
-      if (lastMouseTime.current) {
-        const timeDiff = now - lastMouseTime.current;
-        if (timeDiff > 50) { // Sample every 50ms to avoid overload
-          mouseMovements.current.push({ x: e.movementX, y: e.movementY, t: timeDiff });
-          lastMouseTime.current = now;
-        }
-      } else {
-        lastMouseTime.current = now;
+      markActivity(now);
+      state.keyEvents += 1;
+      if (state.lastKeyAt != null) {
+        const interval = now - state.lastKeyAt;
+        if (interval >= 0 && interval <= 60_000) state.keyIntervals.push(interval);
       }
+      state.lastKeyAt = now;
     };
 
-    // --- Click Tracker ---
+    const handlePointerMove = (event) => {
+      const now = performance.now();
+      const x = Number(event.clientX);
+      const y = Number(event.clientY);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      if (state.lastPointerAt == null || state.lastPointerX == null || state.lastPointerY == null) {
+        state.lastPointerAt = now;
+        state.lastPointerX = x;
+        state.lastPointerY = y;
+        markActivity(now);
+        return;
+      }
+      state.pendingPointerDistance = (state.pendingPointerDistance || 0) + Math.hypot(x - state.lastPointerX, y - state.lastPointerY);
+      state.lastPointerX = x;
+      state.lastPointerY = y;
+      const elapsed = now - state.lastPointerAt;
+      markActivity(now);
+      if (elapsed < 50) return;
+      const speed = Math.min(MAX_FEATURE_VALUE, state.pendingPointerDistance / Math.max(elapsed / 1000, 0.001));
+      state.pointerSpeeds.push(speed);
+      state.pointerSamples += 1;
+      state.pendingPointerDistance = 0;
+      state.lastPointerAt = now;
+    };
+
     const handleClick = () => {
       const now = performance.now();
-      if (lastClickTime.current) {
-        clickTimings.current.push(now - lastClickTime.current);
+      markActivity(now);
+      state.clickEvents += 1;
+      if (state.lastClickAt != null) {
+        const interval = now - state.lastClickAt;
+        if (interval >= 0 && interval <= 60_000) state.clickIntervals.push(interval);
       }
-      lastClickTime.current = now;
+      state.lastClickAt = now;
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('click', handleClick);
+    window.addEventListener('keydown', handleKeyDown, { passive: true });
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    window.addEventListener('click', handleClick, { passive: true });
 
-    // Send data to backend every 30 seconds
-    const interval = setInterval(async () => {
-      const calcMean = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
-      const calcStd = (arr) => {
-        if (arr.length < 2) return 0;
-        const mean = calcMean(arr);
-        return Math.sqrt(arr.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / arr.length);
-      };
-
+    const sendBatch = async () => {
+      if (sendingRef.current || document.visibilityState === 'prerender') return;
+      const now = performance.now();
+      const interactions = state.keyEvents + state.pointerSamples + state.clickEvents;
+      if (interactions < MIN_INTERACTIONS_PER_BATCH) return;
+      sendingRef.current = true;
+      const elapsed = Math.max(1, now - state.windowStart);
+      const idleTail = state.lastActivity == null ? elapsed : Math.max(0, now - state.lastActivity - 1000);
+      const idleRatio = Math.max(0, Math.min(1, (state.idleMilliseconds + idleTail) / elapsed));
       const features = {
-        typingIntervalMean: calcMean(keyTimings.current) || 150,
-        typingIntervalStd: calcStd(keyTimings.current) || 30,
-        typingIntervalMedian: calcMean(keyTimings.current) || 150, // Simplified for now
-        pointerSpeedMean: calcMean(mouseMovements.current.map(m => Math.sqrt(m.x**2 + m.y**2))) || 1.5,
-        pointerSpeedStd: calcStd(mouseMovements.current.map(m => Math.sqrt(m.x**2 + m.y**2))) || 0.5,
-        clickIntervalMean: calcMean(clickTimings.current) || 800,
-        clickIntervalStd: calcStd(clickTimings.current) || 200,
-        idleRatio: 0.1, // Simplified for now
-        navigationCount: 1,
-        interactionCount: keyTimings.current.length + mouseMovements.current.length
+        typingIntervalMean: mean(state.keyIntervals),
+        typingIntervalStd: standardDeviation(state.keyIntervals),
+        typingIntervalMedian: median(state.keyIntervals),
+        pointerSpeedMean: mean(state.pointerSpeeds),
+        pointerSpeedStd: standardDeviation(state.pointerSpeeds),
+        clickIntervalMean: mean(state.clickIntervals),
+        clickIntervalStd: standardDeviation(state.clickIntervals),
+        idleRatio,
+        navigationCount: Math.max(0, Math.floor(state.navigationCount)),
+        interactionCount: Math.max(0, Math.floor(interactions)),
       };
 
-      // Only send if we have some data
-      if (features.interactionCount > 10) {
-        try {
-          await api.post('/behaviour/batches', {
-            schemaVersion: 1,
-            observedAt: new Date().toISOString(),
-            windowDurationMs: 30000,
-            features
-          });
-          // Clear the arrays after sending
-          keyTimings.current = [];
-          mouseMovements.current = [];
-          clickTimings.current = [];
-        } catch (err) {
-          console.error('Failed to send behaviour batch', err);
+      try {
+        const response = await api.post('/behaviour/batches', {
+          schemaVersion: 1,
+          observedAt: new Date().toISOString(),
+          source: 'live',
+          features,
+        });
+        const result = response.data;
+        window.dispatchEvent(new CustomEvent('sentinel:behaviour-batch', { detail: result }));
+        if (result?.decision?.policyApplied) {
+          window.dispatchEvent(new CustomEvent('sentinel:risk-decision', { detail: result }));
         }
+        resetWindow(state, performance.now(), pathnameRef.current);
+      } catch (error) {
+        const status = error.response?.status;
+        if (status === 401) {
+          window.dispatchEvent(new CustomEvent('sentinel:auth-expired'));
+        } else if (status === 403) {
+          window.dispatchEvent(new CustomEvent('sentinel:behaviour-blocked', {
+            detail: {
+              code: error.response?.data?.code,
+              message: error.response?.data?.message || 'Behaviour batch was blocked by session policy.',
+            },
+          }));
+        } else {
+          console.warn('Behaviour batch was not submitted:', error.response?.data?.message || error.message);
+        }
+      } finally {
+        sendingRef.current = false;
       }
-    }, 30000);
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('click', handleClick);
-      clearInterval(interval);
     };
-  }, [isAuthenticated]);
+
+    const intervalId = window.setInterval(sendBatch, WINDOW_INTERVAL_MS);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('click', handleClick);
+    };
+  }, [isAuthenticated, monitoringEnabled]);
 };

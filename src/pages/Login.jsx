@@ -1,132 +1,83 @@
-import { useState } from "react";
-import Button from "../components/UI/Button";
-import { useAuth } from "../hooks/useAuth";
-import { useToast } from "../context/ToastContext";
-import { useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import { ArrowRight, Eye, EyeOff, LockKeyhole, Mail, UserRound } from 'lucide-react';
+import Button from '../components/UI/Button';
+import { useAuth } from '../hooks/useAuth';
+import { useToast } from '../context/ToastContext';
 
 const Login = () => {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-
-  const { login } = useAuth();
+  const [mode, setMode] = useState('login');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const { login, register } = useAuth();
   const { addToast } = useToast();
   const navigate = useNavigate();
+  const isRegister = mode === 'register';
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setIsLoading(true);
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setErrorMessage('');
+    const result = isRegister
+      ? await register({ name, email, password })
+      : await login(email, password);
+    setBusy(false);
 
-    const result = await login(email, password);
-
-    if (result.success) {
-      addToast("Authentication successful. Welcome back.", "success");
-      navigate("/dashboard");
-    } else {
-      addToast(result.message, "error");
+    if (!result.success) {
+      setErrorMessage(result.message);
+      return;
     }
 
-    setIsLoading(false);
+    addToast(isRegister ? 'Account created and signed in.' : 'Authentication successful.', 'success');
+    navigate('/dashboard', { replace: true });
+  };
+
+  const switchMode = () => {
+    setMode((current) => current === 'login' ? 'register' : 'login');
+    setErrorMessage('');
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="liquid-glass"
-      style={{ padding: "40px" }}
-    >
-      <h2
-        style={{
-          fontSize: "28px",
-          fontWeight: "700",
-          marginBottom: "8px",
-          letterSpacing: "-0.5px",
-        }}
-      >
-        Welcome Back
-      </h2>
-      <p
-        style={{
-          color: "var(--text-muted)",
-          fontSize: "15px",
-          marginBottom: "32px",
-        }}
-      >
-        Sign in to your account to continue
-      </p>
+    <motion.section initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="auth-card">
+      <div className="auth-card-heading">
+        <p className="eyebrow">SECURE ACCESS</p>
+        <h2>{isRegister ? 'Create your account' : 'Welcome back'}</h2>
+        <p>{isRegister ? 'Set up your Sentinel account to begin enrollment.' : 'Sign in to review your active session and behavioural security.'}</p>
+      </div>
 
-      <form
-        onSubmit={handleLogin}
-        style={{ display: "flex", flexDirection: "column", gap: "24px" }}
-      >
-        <div>
-          <label
-            style={{
-              display: "block",
-              fontSize: "13px",
-              fontWeight: "500",
-              marginBottom: "10px",
-              color: "rgba(255,255,255,0.8)",
-            }}
-          >
-            Email Address
+      {errorMessage && <div className="inline-error" role="alert">{errorMessage}</div>}
+
+      <form onSubmit={handleSubmit} className="auth-form">
+        {isRegister && (
+          <label className="form-field">
+            <span>Full name</span>
+            <div className="input-with-icon"><UserRound size={18} /><input autoComplete="name" type="text" value={name} onChange={(event) => setName(event.target.value)} placeholder="Your name" minLength={2} maxLength={100} required /></div>
           </label>
-          <input
-            type="email"
-            placeholder="john@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-        </div>
-        <div>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              marginBottom: "10px",
-            }}
-          >
-            <label
-              style={{
-                fontSize: "13px",
-                fontWeight: "500",
-                color: "rgba(255,255,255,0.8)",
-              }}
-            >
-              Password
-            </label>
-            <a
-              href="#"
-              style={{
-                fontSize: "13px",
-                color: "var(--primary)",
-                textDecoration: "none",
-              }}
-            >
-              Forgot?
-            </a>
-          </div>
-          <input
-            type="password"
-            placeholder="••••••••"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-        </div>
-
-        <Button
-          type="submit"
-          isLoading={isLoading}
-          style={{ marginTop: "8px" }}
-        >
-          Sign In
+        )}
+        <label className="form-field">
+          <span>Email address</span>
+          <div className="input-with-icon"><Mail size={18} /><input autoComplete="email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" maxLength={254} required /></div>
+        </label>
+        <label className="form-field">
+          <span>Password</span>
+          <div className="input-with-icon"><LockKeyhole size={18} /><input autoComplete={isRegister ? 'new-password' : 'current-password'} type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder={isRegister ? 'At least 10 characters' : 'Enter your password'} minLength={isRegister ? 10 : undefined} maxLength={128} required /><button className="password-visibility" type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div>
+        </label>
+        <Button type="submit" isLoading={busy} style={{ marginTop: '8px' }}>
+          {isRegister ? 'Create account' : 'Sign in'} <ArrowRight size={18} />
         </Button>
       </form>
-    </motion.div>
+
+      <div className="auth-switch-row">
+        <span>{isRegister ? 'Already have an account?' : 'New to Sentinel?'}</span>
+        <button type="button" onClick={switchMode}>{isRegister ? 'Sign in' : 'Create account'}</button>
+      </div>
+      {isRegister && <p className="auth-small-note">Passwords must be 10–128 characters. Do not reuse a password from another account.</p>}
+    </motion.section>
   );
 };
 

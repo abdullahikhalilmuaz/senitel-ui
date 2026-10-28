@@ -1,59 +1,55 @@
-import React from 'react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { Cpu, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { AlertTriangle, BrainCircuit, CheckCircle2, Database, Gauge } from 'lucide-react';
+import { api } from '../services/api';
 
-const matrixData = [
-  { name: 'True Positive', value: 468, color: 'var(--success)' },
-  { name: 'False Positive', value: 12, color: 'var(--warning)' },
-  { name: 'False Negative', value: 18, color: 'var(--danger)' },
-  { name: 'True Negative', value: 372, color: 'var(--success)' },
-];
+const humanize = (value) => String(value || 'unknown').replaceAll('_', ' ');
 
-const AIModel = () => (
-  <div>
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
-      <div>
-        <h1 style={{ fontSize: '28px', fontWeight: '700' }}>AI Model Evaluation</h1>
-        <p style={{ color: 'var(--text-muted)' }}>Performance metrics and results of the behavioural analysis model.</p>
+const AIModel = () => {
+  const [monitoring, setMonitoring] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const [summaryResponse, profileResponse] = await Promise.all([
+        api.get('/dashboard/summary'),
+        api.get('/profiles'),
+      ]);
+      setMonitoring(summaryResponse.data?.monitoring || {});
+      setProfile(profileResponse.data || {});
+      setError('');
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Model status could not be loaded.');
+    }
+  }, []);
+
+  useEffect(() => { load(); const timer = window.setInterval(load, 10000); return () => window.clearInterval(timer); }, [load]);
+
+  const modelAvailable = ['available', 'loaded', 'ok'].includes(String(monitoring?.modelStatus || '').toLowerCase());
+  const productionReady = Boolean(monitoring?.productionReady);
+  const statusColor = modelAvailable ? 'var(--success)' : 'var(--warning)';
+
+  return (
+    <div>
+      <div className="page-heading"><div><p className="eyebrow">MODEL OPERATIONS</p><h1 style={{ marginTop: 9 }}>AI model status</h1><p>Operational status from the backend, without fabricated evaluation metrics.</p></div><span className="status-pill" style={{ color: statusColor }}><span className="status-dot" style={{ background: statusColor, marginTop: 0 }} />{modelAvailable ? 'Service available' : 'Check service'}</span></div>
+      {error && <div className="inline-message error" style={{ marginBottom: 18 }}>{error}</div>}
+      <div className="stat-grid" style={{ marginBottom: 20 }}>
+        <div className="stat-card"><div className="stat-label"><BrainCircuit size={14} style={{ verticalAlign: 'middle', marginRight: 7 }} />Model version</div><div className="stat-value" style={{ fontSize: 21 }}>{monitoring?.modelVersion || profile?.modelVersion || 'Unknown'}</div><div className="stat-detail">Isolation Forest inference service</div></div>
+        <div className="stat-card"><div className="stat-label"><Gauge size={14} style={{ verticalAlign: 'middle', marginRight: 7 }} />Production validation</div><div className="stat-value" style={{ fontSize: 21, color: productionReady ? 'var(--success)' : 'var(--warning)' }}>{productionReady ? 'Validated' : 'Not evaluated'}</div><div className="stat-detail">Requires evaluation using labelled, consented test data</div></div>
+        <div className="stat-card"><div className="stat-label"><Database size={14} style={{ verticalAlign: 'middle', marginRight: 7 }} />Personalized baseline</div><div className="stat-value" style={{ fontSize: 21, textTransform: 'capitalize' }}>{humanize(profile?.status)}</div><div className="stat-detail">{profile?.sampleCount || 0} live samples collected</div></div>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(139,92,246,0.1)', color: 'var(--primary)', padding: '8px 16px', borderRadius: '20px', fontSize: '13px', fontWeight: '600' }}>
-         <Cpu size={16} /> Isolation Forest • v1.0
-      </div>
-    </div>
-
-    <div className="grid-responsive">
-      {[
-        { label: 'Detection Rate', val: '94.2%', sub: '+2.3%', color: 'var(--success)' },
-        { label: 'False Acceptance', val: '2.1%', sub: '-1.2%', color: 'var(--success)' },
-        { label: 'False Rejection', val: '3.7%', sub: '-0.8%', color: 'var(--success)' },
-        { label: 'Detection Latency', val: '1.8s', sub: '-0.6s', color: 'var(--success)' }
-      ].map((m, i) => (
-        <div key={i} className="liquid-glass" style={{ padding: '24px' }}>
-           <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '8px' }}>{m.label}</div>
-           <div style={{ fontSize: '28px', fontWeight: '700', marginBottom: '8px' }}>{m.val}</div>
-           <div style={{ fontSize: '13px', color: m.color }}>{m.sub} from last version</div>
+      <section className="panel">
+        <h2 className="panel-title">Current evaluation status</h2>
+        {!productionReady ? <div className="inline-message warning"><AlertTriangle size={17} style={{ verticalAlign: 'middle', marginRight: 8 }} />The model service is available, but the model is not production-validated. It was trained on synthetic demo data; its anomaly score is not a probability that the account is being used by an impostor.</div> : <div className="inline-message"><CheckCircle2 size={17} style={{ verticalAlign: 'middle', marginRight: 8 }} />The backend reports production validation as complete.</div>}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 15, marginTop: 20 }}>
+          <div className="panel"><div className="muted" style={{ fontSize: 11, marginBottom: 7 }}>Backend model service</div><strong style={{ fontSize: 13, textTransform: 'capitalize' }}>{humanize(monitoring?.modelStatus)}</strong></div>
+          <div className="panel"><div className="muted" style={{ fontSize: 11, marginBottom: 7 }}>Baseline sample threshold</div><strong style={{ fontSize: 13 }}>20 live batches</strong></div>
+          <div className="panel"><div className="muted" style={{ fontSize: 11, marginBottom: 7 }}>Metrics</div><strong style={{ fontSize: 13 }}>No labelled evaluation set</strong></div>
         </div>
-      ))}
-
-      <div className="liquid-glass" style={{ padding: '24px', gridColumn: '1 / -1' }}>
-        <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '24px' }}>Confusion Matrix (Last 30 Days)</h3>
-        <div style={{ height: '250px' }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={matrixData} layout="vertical" margin={{ left: 50 }}>
-              <XAxis type="number" stroke="rgba(255,255,255,0.2)" tick={{ fill: 'rgba(255,255,255,0.5)' }} />
-              <YAxis dataKey="name" type="category" stroke="rgba(255,255,255,0.2)" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 12 }} />
-              <Tooltip cursor={{ fill: 'rgba(255,255,255,0.05)' }} contentStyle={{ background: '#0a0a0f', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }} />
-              <Bar dataKey="value" radius={[0, 8, 8, 0]} barSize={30}>
-                {matrixData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+        <p className="muted" style={{ marginTop: 18, fontSize: 11, lineHeight: 1.7 }}>The application intentionally does not display accuracy, false-acceptance, or false-rejection percentages until the evaluation pipeline has measured them on a labelled dataset.</p>
+      </section>
     </div>
-  </div>
-);
+  );
+};
 
 export default AIModel;

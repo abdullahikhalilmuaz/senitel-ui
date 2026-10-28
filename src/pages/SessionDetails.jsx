@@ -1,61 +1,89 @@
-import React from 'react';
-import { ArrowLeft, Shield, AlertCircle } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, Ban, Clock3, Shield, ShieldAlert } from 'lucide-react';
+import { api } from '../services/api';
+import { useAuth } from '../hooks/useAuth';
+import { useToast } from '../context/ToastContext';
 
-const SessionDetails = () => (
-  <div>
-    <button style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '24px', cursor: 'pointer', fontSize: '14px' }}>
-      <ArrowLeft size={16} /> Back to logs
-    </button>
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
-       <h1 style={{ fontSize: '28px', fontWeight: '700' }}>Session Details</h1>
-       <span style={{ padding: '6px 16px', background: 'rgba(239,68,68,0.15)', color: 'var(--danger)', borderRadius: '20px', fontSize: '13px', fontWeight: '600' }}>Suspicious</span>
-    </div>
+const dateText = (value) => value ? new Date(value).toLocaleString() : 'Not recorded';
+const humanize = (value) => String(value || 'unknown').replaceAll('_', ' ');
+const colorFor = (value) => ({ active: 'var(--success)', low: 'var(--success)', medium: 'var(--warning)', step_up_required: 'var(--warning)', high: 'var(--danger)', restricted: 'var(--danger)', revoked: 'var(--text-muted)', expired: 'var(--text-muted)', unknown: 'var(--text-muted)' }[value] || 'var(--text-muted)');
 
-    <div className="grid-responsive">
-      <div className="liquid-glass" style={{ padding: '32px', gridColumn: 'span 2' }}>
-        <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '24px' }}>Session Timeline</h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', borderLeft: '2px solid rgba(255,255,255,0.1)', paddingLeft: '24px', marginLeft: '8px' }}>
-           {[
-             { time: '10:21', title: 'Session Started', desc: 'User logged in from Chrome on Windows', type: 'normal' },
-             { time: '10:24', title: 'Behavioural Change Detected', desc: 'Typing pattern deviated from baseline', type: 'warning' },
-             { time: '10:27', title: 'Risk Score Increased', desc: 'Current score: 64% (Medium risk)', type: 'danger' },
-             { time: '10:28', title: 'Verification Required', desc: 'Step-up authentication requested', type: 'warning' }
-           ].map((item, i) => (
-             <div key={i} style={{ position: 'relative' }}>
-               <div style={{ position: 'absolute', left: '-33px', top: '0', width: '16px', height: '16px', borderRadius: '50%', background: item.type === 'danger' ? 'var(--danger)' : item.type === 'warning' ? 'var(--warning)' : 'var(--primary)', border: '4px solid #0f0f1a' }} />
-               <div style={{ display: 'flex', gap: '16px' }}>
-                 <span style={{ fontSize: '13px', color: 'var(--text-muted)', width: '50px' }}>{item.time}</span>
-                 <div>
-                   <h4 style={{ fontSize: '15px', fontWeight: '600', color: item.type === 'danger' ? 'var(--danger)' : 'white' }}>{item.title}</h4>
-                   <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '4px' }}>{item.desc}</p>
-                 </div>
-               </div>
-             </div>
-           ))}
+const SessionDetails = () => {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const { session: currentSession, logout } = useAuth();
+  const { addToast } = useToast();
+  const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const isCurrentSession = Boolean(currentSession?._id && String(currentSession._id) === String(id));
+
+  const load = useCallback(async () => {
+    try {
+      const response = await api.get(`/sessions/${id}`);
+      setSession(response.data);
+      setError('');
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Could not load this session.');
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleRevoke = async () => {
+    const message = isCurrentSession
+      ? 'Revoking the current session will sign you out. Continue?'
+      : 'Revoke this session? The associated token will no longer be valid.';
+    if (!window.confirm(message)) return;
+    setBusy(true);
+    try {
+      await api.post(`/sessions/${id}/revoke`);
+      addToast('Session revoked.', 'success');
+      if (isCurrentSession) {
+        await logout();
+        navigate('/login', { replace: true });
+      } else {
+        await load();
+      }
+    } catch (requestError) {
+      addToast(requestError.response?.data?.message || 'Could not revoke this session.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (loading) return <div className="empty-state">Loading session details…</div>;
+  if (error || !session) return <div><Link className="primary-link" to="/logs">← Back to session logs</Link><div className="inline-message error" style={{ marginTop: 18 }}>{error || 'Session not found.'}</div></div>;
+
+  const canRevoke = !['revoked', 'expired'].includes(session.status);
+
+  return (
+    <div>
+      <div className="page-heading"><div><Link className="primary-link" to="/logs" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 14 }}><ArrowLeft size={15} /> Back to logs</Link><p className="eyebrow">SESSION RECORD</p><h1 style={{ marginTop: 9 }}>Session details</h1><p className="muted" style={{ overflowWrap: 'anywhere' }}>{session._id}</p></div><span className="status-pill" style={{ color: colorFor(session.status) }}>{humanize(session.status)}</span></div>
+      <div className="stat-grid" style={{ marginBottom: 20 }}>
+        <div className="stat-card"><div className="stat-label"><Shield size={14} style={{ verticalAlign: 'middle', marginRight: 7 }} />Risk level</div><div className="stat-value" style={{ fontSize: 21, textTransform: 'capitalize', color: colorFor(session.riskLevel) }}>{humanize(session.riskLevel)}</div><div className="stat-detail">{session.riskLevel === 'unknown' ? 'No personalized policy assessment recorded' : 'Risk state from backend session data'}</div></div>
+        <div className="stat-card"><div className="stat-label"><ShieldAlert size={14} style={{ verticalAlign: 'middle', marginRight: 7 }} />Trust score</div><div className="stat-value" style={{ fontSize: 21 }}>{session.riskLevel !== 'unknown' && Number.isFinite(session.trustScore) ? `${Math.round(session.trustScore)}%` : '—'}</div><div className="stat-detail">Not displayed until a risk level has been assessed</div></div>
+        <div className="stat-card"><div className="stat-label"><Clock3 size={14} style={{ verticalAlign: 'middle', marginRight: 7 }} />Last activity</div><div className="stat-value" style={{ fontSize: 14 }}>{session.lastActivityAt ? new Date(session.lastActivityAt).toLocaleTimeString() : '—'}</div><div className="stat-detail">{dateText(session.lastActivityAt)}</div></div>
+      </div>
+      <section className="panel">
+        <h2 className="panel-title">Recorded session metadata</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 20 }}>
+          <div><div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>Created</div><strong style={{ fontSize: 12 }}>{dateText(session.createdAt)}</strong></div>
+          <div><div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>Expires</div><strong style={{ fontSize: 12 }}>{dateText(session.expiresAt)}</strong></div>
+          <div><div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>Last risk assessment</div><strong style={{ fontSize: 12 }}>{dateText(session.lastAssessmentAt)}</strong></div>
+          <div><div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>Origin IP</div><strong style={{ fontSize: 12 }}>{session.deviceMetadata?.ip || 'Not recorded'}</strong></div>
+          <div><div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>Verification state</div><strong style={{ fontSize: 12, textTransform: 'capitalize' }}>{humanize(session.verificationStatus)}</strong></div>
+          <div><div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>Current browser session</div><strong style={{ fontSize: 12 }}>{isCurrentSession ? 'Yes' : 'No'}</strong></div>
         </div>
-      </div>
-
-      <div className="liquid-glass" style={{ padding: '32px' }}>
-         <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '24px' }}>Behaviour Summary</h3>
-         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '8px' }}>
-                 <span>Typing Speed</span>
-                 <span style={{ color: 'var(--danger)' }}>-22% from baseline</span>
-              </div>
-              <div style={{ height: '6px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px' }}><div style={{ width: '78%', height: '100%', background: 'var(--danger)', borderRadius: '3px' }} /></div>
-            </div>
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '8px' }}>
-                 <span>Mouse Movement</span>
-                 <span style={{ color: 'var(--warning)' }}>+18% from baseline</span>
-              </div>
-              <div style={{ height: '6px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px' }}><div style={{ width: '60%', height: '100%', background: 'var(--warning)', borderRadius: '3px' }} /></div>
-            </div>
-         </div>
-      </div>
+        <div className="inline-message" style={{ marginTop: 20 }}>The backend currently exposes session state and timestamps, not a per-session behavioural timeline. No timeline or activity statistics are fabricated on this page.</div>
+        {canRevoke && <button className="action-button danger" type="button" onClick={handleRevoke} disabled={busy} style={{ marginTop: 20 }}><Ban size={15} />{busy ? 'Revoking…' : isCurrentSession ? 'Revoke current session and sign out' : 'Revoke session'}</button>}
+      </section>
     </div>
-  </div>
-);
+  );
+};
 
 export default SessionDetails;

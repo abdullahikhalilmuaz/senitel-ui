@@ -1,46 +1,48 @@
-import React from 'react';
-import { AlertCircle, ShieldAlert, CheckCircle } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { RefreshCw, ShieldAlert } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
+import { api } from '../services/api';
 
-const alerts = [
-  { id: 1, date: 'Today, 10:24', event: 'Behavioural deviation detected', desc: 'Unusual typing rhythm and mouse movement', risk: 'High', color: 'var(--danger)' },
-  { id: 2, date: 'Yesterday, 15:40', event: 'New device detected', desc: 'Login from unknown device', risk: 'Medium', color: 'var(--warning)' },
-  { id: 3, date: 'Oct 26, 09:12', event: 'Multiple failed verifications', desc: 'Step-up authentication failed 3 times', risk: 'High', color: 'var(--danger)' },
-];
+const dateText = (value) => value ? new Date(value).toLocaleString() : '—';
+const severityColor = (severity) => ({ low: 'var(--success)', medium: 'var(--warning)', high: 'var(--danger)' }[String(severity).toLowerCase()] || 'var(--text-muted)');
+const humanize = (value) => String(value || 'alert').replaceAll('_', ' ');
 
-const SecurityAlerts = () => (
-  <div>
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
-       <div>
-         <h1 style={{ fontSize: '28px', fontWeight: '700', letterSpacing: '-0.5px' }}>Security Alerts</h1>
-         <p style={{ color: 'var(--text-muted)' }}>View and manage suspicious activities and risk events.</p>
-       </div>
-       <div style={{ display: 'flex', gap: '8px' }}>
-          <button style={{ padding: '8px 16px', background: 'var(--primary)', color: 'white', border: 'none', borderRadius: '20px', fontSize: '13px', cursor: 'pointer' }}>All</button>
-          <button style={{ padding: '8px 16px', background: 'transparent', color: 'var(--text-muted)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '20px', fontSize: '13px', cursor: 'pointer' }}>High Risk</button>
-       </div>
+const SecurityAlerts = () => {
+  const [alerts, setAlerts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const response = await api.get('/alerts');
+      setAlerts(Array.isArray(response.data) ? response.data : []);
+      setError('');
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Could not load security alerts.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); const timer = window.setInterval(load, 10000); return () => window.clearInterval(timer); }, [load]);
+  const openCount = alerts.filter((alert) => alert.status === 'open').length;
+
+  return (
+    <div>
+      <div className="page-heading"><div><p className="eyebrow">THREAT AND POLICY EVENTS</p><h1 style={{ marginTop: 9 }}>Security alerts</h1><p>Alerts recorded by the backend for this account.</p></div><button className="action-button" type="button" onClick={load}><RefreshCw size={15} /> Refresh</button></div>
+      <div className="stat-grid" style={{ marginBottom: 20 }}><div className="stat-card"><div className="stat-label"><ShieldAlert size={14} style={{ verticalAlign: 'middle', marginRight: 7 }} />Total alerts</div><div className="stat-value">{alerts.length}</div><div className="stat-detail">Alert records returned by the API</div></div><div className="stat-card"><div className="stat-label"><AlertTriangle size={14} style={{ verticalAlign: 'middle', marginRight: 7 }} />Open alerts</div><div className="stat-value">{openCount}</div><div className="stat-detail">Alerts with status open</div></div></div>
+      {error && <div className="inline-message error" style={{ marginBottom: 18 }}>{error}</div>}
+      {loading && alerts.length === 0 ? <div className="empty-state">Loading alerts…</div> : alerts.length === 0 ? <div className="empty-state">No security alerts have been recorded for this account.</div> : <div style={{ display: 'grid', gap: 12 }}>{alerts.map((alert) => {
+        const color = severityColor(alert.severity);
+        return <article className="panel" key={alert._id} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 14, borderLeft: `3px solid ${color}` }}>
+          <div style={{ display: 'grid', placeItems: 'center', width: 42, height: 42, flex: '0 0 42px', borderRadius: 13, color, background: `${color}16` }}><ShieldAlert size={20} /></div>
+          <div style={{ flex: '1 1 280px', minWidth: 0 }}><div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 9, marginBottom: 7 }}><strong style={{ fontSize: 14, textTransform: 'capitalize' }}>{humanize(alert.type)}</strong><span className="status-pill" style={{ padding: '4px 8px', color, borderColor: `${color}45` }}>{humanize(alert.severity)}</span><span className="status-pill" style={{ padding: '4px 8px' }}>{humanize(alert.status)}</span></div><p className="muted" style={{ margin: 0, fontSize: 12, lineHeight: 1.7 }}>{alert.reason || 'No additional reason was recorded.'}</p>{alert.sessionId && <Link className="primary-link" style={{ display: 'inline-block', marginTop: 10, fontSize: 11 }} to={`/logs/${alert.sessionId}`}>View related session →</Link>}</div>
+          <time className="muted" style={{ fontSize: 10 }}>{dateText(alert.createdAt)}</time>
+        </article>;
+      })}</div>}
     </div>
-
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      {alerts.map((alert) => (
-        <div key={alert.id} className="liquid-glass" style={{ padding: '20px', display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
-           <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: `rgba(255,255,255,0.05)`, display: 'flex', justifyContent: 'center', alignItems: 'center', color: alert.color }}>
-              <ShieldAlert size={24} />
-           </div>
-           <div style={{ flex: 1, minWidth: '200px' }}>
-              <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '4px' }}>
-                <h3 style={{ fontSize: '16px', fontWeight: '600' }}>{alert.event}</h3>
-                <span style={{ fontSize: '12px', padding: '2px 8px', borderRadius: '4px', background: `${alert.color}20`, color: alert.color, fontWeight: '600' }}>{alert.risk} Risk</span>
-              </div>
-              <p style={{ fontSize: '14px', color: 'var(--text-muted)' }}>{alert.desc}</p>
-           </div>
-           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
-              <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>{alert.date}</span>
-              <button style={{ background: 'transparent', border: 'none', color: 'var(--primary)', fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}>View Details</button>
-           </div>
-        </div>
-      ))}
-    </div>
-  </div>
-);
+  );
+};
 
 export default SecurityAlerts;

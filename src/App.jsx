@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard';
 import LiveMonitoring from './pages/LiveMonitoring';
 import DemoMode from './pages/DemoMode';
 import BehaviourAnalytics from './pages/BehaviourAnalytics';
+import BehaviourLab from './pages/BehaviourLab';
 import SessionLogs from './pages/SessionLogs';
 import SessionDetails from './pages/SessionDetails';
 import SecurityAlerts from './pages/SecurityAlerts';
@@ -26,11 +27,11 @@ function App() {
       <Route path="/login" element={<AuthLayout />}>
         <Route index element={<Login />} />
       </Route>
-      
       <Route path="/" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="monitoring" element={<LiveMonitoring />} />
+        <Route path="behaviour-lab" element={<BehaviourLab />} />
         <Route path="demo" element={<DemoMode />} />
         <Route path="analytics" element={<BehaviourAnalytics />} />
         <Route path="logs" element={<SessionLogs />} />

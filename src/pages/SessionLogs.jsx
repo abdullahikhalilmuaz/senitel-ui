@@ -1,53 +1,59 @@
-import React from 'react';
-import { Search } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { FileClock, RefreshCw, Search } from 'lucide-react';
+import { api } from '../services/api';
 
-const sessions = [
-  { id: 1, date: 'Today, 10:24', device: 'Windows • Chrome', location: 'Lagos, NG', status: 'Active', risk: 'Low', color: 'var(--success)' },
-  { id: 2, date: 'Yesterday, 15:42', device: 'iPhone • Safari', location: 'Abuja, NG', status: 'Ended', risk: 'Medium', color: 'var(--warning)' },
-  { id: 3, date: 'Oct 26, 09:12', device: 'MacBook • Firefox', location: 'Kano, NG', status: 'Suspicious', risk: 'High', color: 'var(--danger)' },
-];
+const dateText = (value) => value ? new Date(value).toLocaleString() : '—';
+const humanize = (value) => String(value || 'unknown').replaceAll('_', ' ');
+const colorFor = (value) => ({ active: 'var(--success)', low: 'var(--success)', medium: 'var(--warning)', step_up_required: 'var(--warning)', high: 'var(--danger)', restricted: 'var(--danger)', revoked: 'var(--text-muted)', expired: 'var(--text-muted)', unknown: 'var(--text-muted)' }[value] || 'var(--text-muted)');
 
-const SessionLogs = () => (
-  <div>
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px', flexWrap: 'wrap', gap: '16px' }}>
-      <h1 style={{ fontSize: '28px', fontWeight: '700' }}>Session Logs</h1>
-      <div style={{ display: 'flex', gap: '12px', width: '100%', maxWidth: '400px' }}>
-        <div style={{ position: 'relative', flex: 1 }}>
-          <Search size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-          <input placeholder="Search sessions..." style={{ paddingLeft: '44px' }} />
+const SessionLogs = () => {
+  const [sessions, setSessions] = useState([]);
+  const [query, setQuery] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const response = await api.get('/sessions');
+      setSessions(Array.isArray(response.data) ? response.data : []);
+      setError('');
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Could not load your session history.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); const timer = window.setInterval(load, 10000); return () => window.clearInterval(timer); }, [load]);
+
+  const filtered = useMemo(() => sessions.filter((session) => {
+    const text = [session._id, session.status, session.riskLevel, session.deviceMetadata?.ip, session.verificationStatus].join(' ').toLowerCase();
+    return text.includes(query.toLowerCase());
+  }), [sessions, query]);
+
+  return (
+    <div>
+      <div className="page-heading"><div><p className="eyebrow">ACCOUNT ACTIVITY</p><h1 style={{ marginTop: 9 }}>Session logs</h1><p>Sessions returned by the backend for your account.</p></div><button className="action-button" type="button" onClick={load}><RefreshCw size={15} /> Refresh</button></div>
+      <section className="panel">
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 14, alignItems: 'center', marginBottom: 15 }}>
+          <h2 className="panel-title" style={{ margin: 0 }}><FileClock size={16} style={{ verticalAlign: 'middle', marginRight: 7 }} />{sessions.length} session record{sessions.length === 1 ? '' : 's'}</h2>
+          <label style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 8, width: 'min(100%,320px)' }}><Search size={16} style={{ position: 'absolute', left: 12, color: 'var(--text-muted)' }} /><input aria-label="Search sessions" placeholder="Search status, ID, IP…" value={query} onChange={(event) => setQuery(event.target.value)} style={{ paddingLeft: 36 }} /></label>
         </div>
-      </div>
+        {error && <div className="inline-message error" style={{ marginBottom: 14 }}>{error}</div>}
+        {loading && sessions.length === 0 ? <div className="empty-state">Loading sessions…</div> : filtered.length === 0 ? <div className="empty-state">No session records matched this search.</div> : (
+          <div className="data-table-wrap"><table className="data-table"><thead><tr><th>Created</th><th>Session / origin IP</th><th>Status</th><th>Risk</th><th>Last activity</th><th /></tr></thead><tbody>{filtered.map((session) => <tr key={session._id}>
+            <td>{dateText(session.createdAt)}</td>
+            <td><strong style={{ display: 'block', fontWeight: 600 }}>{String(session._id || '').slice(-10) || '—'}</strong><span className="muted" style={{ display: 'block', marginTop: 4 }}>{session.deviceMetadata?.ip || 'IP not recorded'}</span></td>
+            <td><span style={{ color: colorFor(session.status), textTransform: 'capitalize' }}>{humanize(session.status)}</span></td>
+            <td><span style={{ color: colorFor(session.riskLevel), textTransform: 'capitalize' }}>{humanize(session.riskLevel)}</span>{Number.isFinite(session.trustScore) && session.riskLevel !== 'unknown' ? <small className="muted" style={{ display: 'block', marginTop: 4 }}>{Math.round(session.trustScore)}% trust</small> : null}</td>
+            <td>{dateText(session.lastActivityAt)}</td>
+            <td><Link className="primary-link" to={`/logs/${session._id}`}>Details →</Link></td>
+          </tr>)}</tbody></table></div>
+        )}
+      </section>
     </div>
-
-    <div className="liquid-glass" style={{ padding: '24px', overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '600px' }}>
-        <thead>
-          <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: 'var(--text-muted)', fontSize: '13px' }}>
-            <th style={{ padding: '16px' }}>Date & Time</th>
-            <th style={{ padding: '16px' }}>Device</th>
-            <th style={{ padding: '16px' }}>Location</th>
-            <th style={{ padding: '16px' }}>Status</th>
-            <th style={{ padding: '16px' }}>Risk</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sessions.map((s) => (
-            <tr key={s.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: '14px' }}>
-              <td style={{ padding: '16px', fontWeight: '500' }}>{s.date}</td>
-              <td style={{ padding: '16px', color: 'var(--text-muted)' }}>{s.device}</td>
-              <td style={{ padding: '16px', color: 'var(--text-muted)' }}>{s.location}</td>
-              <td style={{ padding: '16px' }}>
-                <span style={{ padding: '4px 12px', borderRadius: '20px', fontSize: '12px', background: `rgba(255,255,255,0.05)`, color: s.status === 'Active' ? 'var(--success)' : s.status === 'Suspicious' ? 'var(--danger)' : 'var(--text-muted)' }}>{s.status}</span>
-              </td>
-              <td style={{ padding: '16px' }}>
-                <span style={{ color: s.color, fontWeight: '600' }}>{s.risk}</span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  </div>
-);
+  );
+};
 
 export default SessionLogs;

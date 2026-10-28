@@ -1,42 +1,59 @@
-import React from 'react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { useCallback, useEffect, useState } from 'react';
+import { Activity, Database, Fingerprint } from 'lucide-react';
+import { api } from '../services/api';
 
-const data = [
-  { name: 'Typing Speed', current: 80, baseline: 90 },
-  { name: 'Mouse Move', current: 70, baseline: 85 },
-  { name: 'Click Timing', current: 90, baseline: 90 },
-  { name: 'Pause Duration', current: 60, baseline: 75 },
-];
+const labels = {
+  typingIntervalMean: 'Typing interval mean (ms)',
+  typingIntervalStd: 'Typing interval standard deviation (ms)',
+  typingIntervalMedian: 'Typing interval median (ms)',
+  pointerSpeedMean: 'Pointer speed mean (px/s)',
+  pointerSpeedStd: 'Pointer speed standard deviation (px/s)',
+  clickIntervalMean: 'Click interval mean (ms)',
+  clickIntervalStd: 'Click interval standard deviation (ms)',
+  idleRatio: 'Idle ratio (0–1)',
+  navigationCount: 'Navigation count',
+  interactionCount: 'Interaction count',
+};
+const format = (value) => Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—';
 
-const BehaviourAnalytics = () => (
-  <div>
-    <h1 style={{ fontSize: '28px', fontWeight: '700', marginBottom: '32px' }}>Behaviour Analytics</h1>
-    <div className="grid-responsive">
-      <div className="liquid-glass" style={{ padding: '24px', gridColumn: 'span 2' }}>
-        <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '20px' }}>Behaviour Match Comparison</h3>
-        <div style={{ height: '300px' }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data} barGap={8}>
-              <XAxis dataKey="name" stroke="rgba(255,255,255,0.2)" tick={{ fill: 'rgba(255,255,255,0.6)', fontSize: 12 }} />
-              <YAxis stroke="rgba(255,255,255,0.2)" tick={{ fill: 'rgba(255,255,255,0.6)', fontSize: 12 }} />
-              <Tooltip cursor={{ fill: 'rgba(255,255,255,0.05)' }} contentStyle={{ background: '#0a0a0f', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }} />
-              <Bar dataKey="current" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="baseline" fill="rgba(255,255,255,0.1)" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+const BehaviourAnalytics = () => {
+  const [profile, setProfile] = useState(null);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const response = await api.get('/profiles');
+      setProfile(response.data);
+      setError('');
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || 'Could not load baseline statistics.');
+    }
+  }, []);
+
+  useEffect(() => { load(); const timer = window.setInterval(load, 5000); return () => window.clearInterval(timer); }, [load]);
+
+  const means = profile?.featureStats?.mean || {};
+  const deviations = profile?.featureStats?.std || {};
+  const rows = Object.entries(labels).filter(([key]) => Object.hasOwn(means, key));
+
+  return (
+    <div>
+      <div className="page-heading"><div><p className="eyebrow">BASELINE TELEMETRY</p><h1 style={{ marginTop: 9 }}>Behaviour analytics</h1><p>Feature statistics collected from this account's live enrollment batches.</p></div></div>
+      {error && <div className="inline-message error" style={{ marginBottom: 18 }}>{error}</div>}
+      <div className="stat-grid" style={{ marginBottom: 20 }}>
+        <div className="stat-card"><div className="stat-label"><Database size={14} style={{ verticalAlign: 'middle', marginRight: 7 }} />Profile status</div><div className="stat-value" style={{ fontSize: 21, textTransform: 'capitalize' }}>{String(profile?.status || 'loading').replaceAll('_', ' ')}</div><div className="stat-detail">Profile schema v{profile?.featureSchemaVersion || 1}</div></div>
+        <div className="stat-card"><div className="stat-label"><Activity size={14} style={{ verticalAlign: 'middle', marginRight: 7 }} />Samples collected</div><div className="stat-value">{profile?.sampleCount ?? '—'}</div><div className="stat-detail">20 valid live samples required for a ready baseline</div></div>
+        <div className="stat-card"><div className="stat-label"><Fingerprint size={14} style={{ verticalAlign: 'middle', marginRight: 7 }} />Model version</div><div className="stat-value" style={{ fontSize: 20 }}>{profile?.modelVersion || 'Unknown'}</div><div className="stat-detail">Model output is not an impostor probability</div></div>
       </div>
-      <div className="liquid-glass" style={{ padding: '24px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
-         <div style={{ width: '160px', height: '160px', borderRadius: '50%', background: 'conic-gradient(var(--success) 87%, transparent 0)', display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: '24px' }}>
-            <div style={{ width: '130px', height: '130px', borderRadius: '50%', background: '#0f0f1a', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
-              <span style={{ fontSize: '36px', fontWeight: 'bold' }}>87%</span>
-              <span style={{ fontSize: '12px', color: 'var(--success)' }}>Match Score</span>
-            </div>
-         </div>
-         <p style={{ textAlign: 'center', fontSize: '14px', color: 'var(--text-muted)' }}>Your current activity is consistent with your usual pattern.</p>
-      </div>
+      <section className="panel">
+        <h2 className="panel-title">Enrolled feature statistics</h2>
+        {rows.length === 0 ? <div className="empty-state">No feature statistics have been recorded yet. Enable monitoring in your Behavioural profile and interact with the app to collect live batches.</div> : (
+          <div className="data-table-wrap"><table className="data-table"><thead><tr><th>Feature</th><th>Mean</th><th>Standard deviation</th></tr></thead><tbody>{rows.map(([key, label]) => <tr key={key}><td>{label}</td><td>{format(means[key])}</td><td>{format(deviations[key])}</td></tr>)}</tbody></table></div>
+        )}
+        <p className="muted" style={{ marginTop: 15, fontSize: 11, lineHeight: 1.7 }}>These values describe the enrolled feature summaries. They are not validated identity evidence, and the current population model was trained using synthetic demo data.</p>
+      </section>
     </div>
-  </div>
-);
+  );
+};
 
 export default BehaviourAnalytics;
