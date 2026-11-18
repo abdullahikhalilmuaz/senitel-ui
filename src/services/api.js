@@ -1,10 +1,8 @@
 import axios from 'axios';
 
-const fallbackApiUrl = import.meta.env.DEV
-  ? 'http://127.0.0.1:5000/api'
-  : 'https://caus-backend.onrender.com/api';
-
-const baseURL = (import.meta.env.VITE_API_BASE_URL || fallbackApiUrl).replace(/\/+$/, '');
+const baseURL = import.meta.env.DEV
+  ? '/api'
+  : (import.meta.env.VITE_API_BASE_URL || 'https://caus-backend.onrender.com/api').replace(/\/+$/, '');
 
 export const api = axios.create({
   baseURL,

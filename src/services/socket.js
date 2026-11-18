@@ -1,12 +1,10 @@
-import { io } from 'socket.io-client';
+import { io } from "socket.io-client";
 
-const fallbackApiUrl = import.meta.env.DEV
-  ? 'http://127.0.0.1:5000/api'
-  : 'https://caus-backend.onrender.com/api';
-
-const apiUrl = import.meta.env.VITE_API_BASE_URL || fallbackApiUrl;
-const inferredSocketUrl = apiUrl.replace(/\/api\/?$/, '').replace(/\/+$/, '');
-const socketUrl = (import.meta.env.VITE_SOCKET_URL || inferredSocketUrl).replace(/\/+$/, '');
+const socketUrl = import.meta.env.DEV
+  ? window.location.origin
+  : (
+      import.meta.env.VITE_SOCKET_URL || "https://caus-backend.onrender.com"
+    ).replace(/\/+$/, "");
 
 let socketInstance;
 
